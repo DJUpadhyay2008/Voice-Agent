@@ -25,6 +25,7 @@ export class AudioManager {
     this.mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
+        sampleRate: { ideal: this.sampleRate },
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
@@ -64,9 +65,14 @@ export class AudioManager {
       }
     };
 
-    // Connect nodes: Mic -> WorkletNode
-    // Note: We do NOT connect workletNode to destination, to avoid mic feedback into speakers!
+    // Connect nodes: Mic -> WorkletNode -> Silent Gain -> Destination
+    // Note: Silent Gain (0 volume) keeps Web Audio engine active without mic feedback into speakers!
+    const silentGain = this.audioContext.createGain();
+    silentGain.gain.value = 0;
+
     this.sourceNode.connect(this.workletNode);
+    this.workletNode.connect(silentGain);
+    silentGain.connect(this.audioContext.destination);
 
     this.isRecording = true;
   }

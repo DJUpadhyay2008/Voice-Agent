@@ -139,9 +139,9 @@ async def websocket_call_endpoint(
                 if is_loopback_active:
                     await websocket.send_bytes(audio_chunk)
 
-                # Send telemetry update every ~500ms
+                # Send telemetry update every ~100ms (approx every 3 frames at 32ms)
                 now = time.time()
-                if now - last_stats_time >= 0.5:
+                if now - last_stats_time >= 0.1:
                     await websocket.send_text(json.dumps({
                         "type": "audio_telemetry",
                         "chunks_received": chunks_received,
