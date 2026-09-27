@@ -1,0 +1,114 @@
+import { AudioPlayer } from './audio-player.js';
+
+/**
+ * Manages browser microphone capture and audio pipeline lifecycle.
+ */
+export class AudioManager {
+  constructor({ sampleRate = 16000, chunkSize = 512, onAudioChunk, onRmsUpdate } = {}) {
+    this.sampleRate = sampleRate;
+    this.chunkSize = chunkSize;
+    this.onAudioChunk = onAudioChunk;
+    this.onRmsUpdate = onRmsUpdate;
+
+    this.audioContext = null;
+    this.mediaStream = null;
+    this.sourceNode = null;
+    this.workletNode = null;
+    this.player = new AudioPlayer(sampleRate);
+    this.isRecording = false;
+  }
+
+  async start() {
+    if (this.isRecording) return;
+
+    // 1. Request microphone access with echo cancellation and noise suppression
+    this.mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+
+    // 2. Initialize AudioContext at target sample rate (16kHz)
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    this.audioContext = new AudioContextClass({ sampleRate: this.sampleRate });
+
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+
+    // Initialize player with same audio context
+    await this.player.init(this.audioContext);
+
+    // 3. Load AudioWorklet module
+    await this.audioContext.audioWorklet.addModule('/audio-processor.js');
+
+    // 4. Create source and worklet nodes
+    this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
+    this.workletNode = new AudioWorkletNode(this.audioContext, 'audio-capture-processor', {
+      processorOptions: { chunkSize: this.chunkSize },
+    });
+
+    // 5. Handle audio chunks and RMS values from AudioWorklet
+    this.workletNode.port.onmessage = (event) => {
+      const { type, pcm, rms } = event.data;
+      if (type === 'audio_chunk') {
+        if (this.onAudioChunk && pcm) {
+          this.onAudioChunk(pcm);
+        }
+        if (this.onRmsUpdate && typeof rms === 'number') {
+          this.onRmsUpdate(rms);
+        }
+      }
+    };
+
+    // Connect nodes: Mic -> WorkletNode
+    // Note: We do NOT connect workletNode to destination, to avoid mic feedback into speakers!
+    this.sourceNode.connect(this.workletNode);
+
+    this.isRecording = true;
+  }
+
+  playIncomingChunk(pcmBuffer) {
+    if (this.player) {
+      this.player.playChunk(pcmBuffer);
+    }
+  }
+
+  flushPlayback() {
+    if (this.player) {
+      this.player.flush();
+    }
+  }
+
+  stop() {
+    this.isRecording = false;
+
+    if (this.workletNode) {
+      this.workletNode.port.postMessage({ type: 'set_recording', isRecording: false });
+      this.workletNode.disconnect();
+      this.workletNode = null;
+    }
+
+    if (this.sourceNode) {
+      this.sourceNode.disconnect();
+      this.sourceNode = null;
+    }
+
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach((track) => track.stop());
+      this.mediaStream = null;
+    }
+
+    if (this.player) {
+      this.player.flush();
+    }
+
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+  }
+}
