@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { AudioManager } from './audio/audio-manager';
+import { SpeechSimulator } from './audio/speech-simulator';
 import { VoiceWebSocketClient } from './services/websocket';
 import { CallButton } from './components/CallButton';
 import { CallStatus } from './components/CallStatus';
@@ -17,9 +18,11 @@ export function App() {
   const [telemetry, setTelemetry] = useState(null);
   const [pingMs, setPingMs] = useState(null);
   const [loopbackEnabled, setLoopbackEnabled] = useState(false);
+  const [isSimulatingSpeech, setIsSimulatingSpeech] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
 
   const audioManagerRef = useRef(null);
+  const speechSimulatorRef = useRef(null);
   const wsClientRef = useRef(null);
   const pingIntervalRef = useRef(null);
 
@@ -41,6 +44,11 @@ export function App() {
 
   const handleStopCall = useCallback(() => {
     stopPingInterval();
+
+    if (speechSimulatorRef.current) {
+      speechSimulatorRef.current.stop();
+      speechSimulatorRef.current = null;
+    }
 
     if (wsClientRef.current) {
       wsClientRef.current.sendJson({ type: 'stop_call' });
@@ -73,26 +81,26 @@ export function App() {
       setChunksSent(0);
       setTelemetry(null);
 
-      // 1. Initialize Audio Manager
-      const audioManager = new AudioManager({
-        sampleRate: 16000,
-        chunkSize: 512,
-        onAudioChunk: (pcmBuffer) => {
-          if (wsClientRef.current?.isConnected) {
-            wsClientRef.current.sendAudio(pcmBuffer);
-            setChunksSent((prev) => prev + 1);
-          }
-        },
-        onRmsUpdate: (val) => {
-          setRms(val);
-        },
-      });
-      audioManagerRef.current = audioManager;
+      // 1. If not using synthetic test audio, start browser microphone
+      if (!isSimulatingSpeech) {
+        const audioManager = new AudioManager({
+          sampleRate: 16000,
+          chunkSize: 512,
+          onAudioChunk: (pcmBuffer) => {
+            if (wsClientRef.current?.isConnected) {
+              wsClientRef.current.sendAudio(pcmBuffer);
+              setChunksSent((prev) => prev + 1);
+            }
+          },
+          onRmsUpdate: (val) => {
+            setRms(val);
+          },
+        });
+        audioManagerRef.current = audioManager;
+        await audioManager.start();
+      }
 
-      // 2. Request mic and start worklet
-      await audioManager.start();
-
-      // 3. Connect WebSocket
+      // 2. Connect WebSocket
       const wsUrl = `ws://${window.location.hostname}:8000/ws/call/${newSessionId}?loopback=${loopbackEnabled}`;
       const wsClient = new VoiceWebSocketClient({
         url: wsUrl,
@@ -102,6 +110,23 @@ export function App() {
           setIsLoading(false);
           wsClient.sendJson({ type: 'start_call' });
           startPingInterval(wsClient);
+
+          // If synthetic test audio is active, start simulator
+          if (isSimulatingSpeech) {
+            const simulator = new SpeechSimulator({
+              sampleRate: 16000,
+              chunkSize: 512,
+              onAudioChunk: (pcmBuffer, simRms) => {
+                if (wsClientRef.current?.isConnected) {
+                  wsClientRef.current.sendAudio(pcmBuffer);
+                  setChunksSent((prev) => prev + 1);
+                  setRms(simRms);
+                }
+              },
+            });
+            speechSimulatorRef.current = simulator;
+            simulator.start();
+          }
         },
         onClose: () => {
           handleStopCall();
@@ -112,7 +137,6 @@ export function App() {
           setStatus('error');
         },
         onBinaryMessage: (arrayBuffer) => {
-          // Play loopback audio echoed by the server
           if (audioManagerRef.current) {
             audioManagerRef.current.playIncomingChunk(arrayBuffer);
           }
@@ -204,6 +228,8 @@ export function App() {
           pingMs={pingMs}
           loopbackEnabled={loopbackEnabled}
           onToggleLoopback={setLoopbackEnabled}
+          isSimulatingSpeech={isSimulatingSpeech}
+          onToggleSimulateSpeech={setIsSimulatingSpeech}
           isCalling={isCalling}
         />
 
