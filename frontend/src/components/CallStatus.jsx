@@ -1,14 +1,21 @@
 import React from 'react';
-import { Wifi, WifiOff, Activity, Radio } from 'lucide-react';
+import { Wifi, WifiOff, Activity, Radio, Mic } from 'lucide-react';
 
 export function CallStatus({ status, sessionId }) {
   const getStatusBadge = () => {
     switch (status) {
+      case 'user_speaking':
+        return {
+          icon: <Mic className="w-4 h-4 animate-bounce text-emerald-400" />,
+          label: 'User Speaking',
+          className: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-semibold ring-2 ring-emerald-500/30',
+        };
+      case 'listening':
       case 'connected':
         return {
-          icon: <Radio className="w-4 h-4 animate-pulse text-emerald-400" />,
-          label: 'Connected & Streaming',
-          className: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
+          icon: <Radio className="w-4 h-4 animate-pulse text-sky-400" />,
+          label: 'Listening...',
+          className: 'bg-sky-500/10 border-sky-500/30 text-sky-400',
         };
       case 'connecting':
         return {

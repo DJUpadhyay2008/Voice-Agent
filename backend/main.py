@@ -1,6 +1,5 @@
 import json
 import time
-import uuid
 from typing import Dict, Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
 from backend.logger import get_logger
 from backend.voice.audio import validate_pcm_chunk, compute_rms, compute_db
+from backend.voice.vad import SileroVADProvider
 
 logger = get_logger("main")
 
@@ -41,6 +41,7 @@ async def health_check() -> Dict[str, Any]:
             "bytes_per_chunk": settings.bytes_per_chunk,
         },
         "loopback_default": settings.ENABLE_LOOPBACK,
+        "vad_provider": "SileroVADProvider (v5 ONNX)",
     }
 
 @app.websocket("/ws/call/{session_id}")
@@ -51,8 +52,7 @@ async def websocket_call_endpoint(
 ):
     """
     Bidirectional WebSocket endpoint for the real-time voice session.
-    Receives continuous 16kHz 16-bit Mono PCM audio chunks.
-    Sends control events, stats, and optional loopback audio.
+    Processes 16kHz 16-bit Mono PCM audio chunks with Silero VAD turn detection.
     """
     await websocket.accept()
     
@@ -61,9 +61,18 @@ async def websocket_call_endpoint(
     chunks_received = 0
     total_bytes = 0
     last_stats_time = time.time()
+
+    # Initialize Silero VAD for this conversation session
+    vad_provider = SileroVADProvider(
+        sample_rate=settings.SAMPLE_RATE,
+        threshold=0.5,
+        neg_threshold=0.35,
+        min_speech_duration_ms=100,
+        min_silence_duration_ms=400,
+    )
     
     logger.info(
-        f"Client connected. loopback={is_loopback_active}, expected_bytes={settings.bytes_per_chunk}",
+        f"Client connected. loopback={is_loopback_active}, vad=SileroVAD",
         extra={"session_id": session_id}
     )
 
@@ -76,13 +85,14 @@ async def websocket_call_endpoint(
             "channels": settings.CHANNELS,
             "chunk_size": settings.CHUNK_SIZE,
             "loopback": is_loopback_active,
+            "vad": "silero_v5",
         },
         "status": "connected"
     }))
 
     try:
         while True:
-            # Receive either binary audio data or JSON control messages
+            # Receive binary audio data or JSON control messages
             message = await websocket.receive()
             
             # 1. Binary Frame: Raw Audio PCM
@@ -100,6 +110,27 @@ async def websocket_call_endpoint(
                         extra={"session_id": session_id}
                     )
                 
+                # Run Voice Activity Detection
+                vad_result = vad_provider.process_chunk(audio_chunk)
+
+                # Broadcast VAD turn events (speech_start / speech_end)
+                if vad_result.event:
+                    await websocket.send_text(json.dumps({
+                        "type": "vad",
+                        "event": vad_result.event,
+                        "probability": round(vad_result.probability, 4),
+                        "speech_duration_ms": vad_result.speech_duration_ms,
+                        "silence_duration_ms": vad_result.silence_duration_ms,
+                        "timestamp": time.time(),
+                    }))
+
+                    # Notify status update
+                    new_status = "user_speaking" if vad_result.event == "speech_start" else "listening"
+                    await websocket.send_text(json.dumps({
+                        "type": "call_status",
+                        "status": new_status,
+                    }))
+
                 # Compute audio volume metrics
                 rms = compute_rms(audio_chunk)
                 db = compute_db(rms)
@@ -108,7 +139,7 @@ async def websocket_call_endpoint(
                 if is_loopback_active:
                     await websocket.send_bytes(audio_chunk)
 
-                # Send telemetry update every ~500ms (approx every 15 frames)
+                # Send telemetry update every ~500ms
                 now = time.time()
                 if now - last_stats_time >= 0.5:
                     await websocket.send_text(json.dumps({
@@ -117,6 +148,8 @@ async def websocket_call_endpoint(
                         "total_bytes": total_bytes,
                         "rms": round(rms, 4),
                         "db": db,
+                        "vad_speech": vad_result.is_speech,
+                        "vad_prob": round(vad_result.probability, 4),
                         "timestamp": now,
                     }))
                     last_stats_time = now
@@ -134,6 +167,7 @@ async def websocket_call_endpoint(
                             "server_time": time.time(),
                         }))
                     elif msg_type == "start_call":
+                        vad_provider.reset()
                         logger.info("Call started by client", extra={"session_id": session_id})
                         await websocket.send_text(json.dumps({
                             "type": "call_status",
@@ -162,13 +196,3 @@ async def websocket_call_endpoint(
             await websocket.close(code=1011, reason=str(e))
         except Exception:
             pass
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "backend.main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.DEBUG,
-        log_level="info",
-    )

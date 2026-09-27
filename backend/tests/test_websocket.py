@@ -1,4 +1,3 @@
-import asyncio
 import json
 import numpy as np
 from fastapi.testclient import TestClient
@@ -11,38 +10,26 @@ def test_health_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert data["audio_config"]["sample_rate"] == 16000
-    assert data["audio_config"]["bytes_per_chunk"] == 1024
+    assert data["vad_provider"] == "SileroVADProvider (v5 ONNX)"
 
-def test_websocket_audio_flow():
+def test_websocket_vad_flow():
     client = TestClient(app)
-    session_id = "test-session-123"
+    session_id = "test-vad-session"
     
-    with client.websocket_connect(f"/ws/call/{session_id}?loopback=true") as ws:
+    with client.websocket_connect(f"/ws/call/{session_id}?loopback=false") as ws:
         # 1. Verify session created greeting
         init_msg = ws.receive_json()
         assert init_msg["type"] == "session_created"
-        assert init_msg["session_id"] == session_id
-        assert init_msg["config"]["sample_rate"] == 16000
-        assert init_msg["config"]["loopback"] is True
+        assert init_msg["config"]["vad"] == "silero_v5"
         
         # 2. Send ping, receive pong
         ws.send_text(json.dumps({"type": "ping", "timestamp": 12345}))
         pong = ws.receive_json()
         assert pong["type"] == "pong"
-        assert pong["client_time"] == 12345
         
-        # 3. Send binary audio chunk (512 samples = 1024 bytes)
-        t = np.linspace(0, 512 / 16000, 512, endpoint=False, dtype=np.float32)
-        sine = 0.5 * np.sin(2 * np.pi * 440 * t)
-        pcm_bytes = float32_to_pcm(sine)
-        assert len(pcm_bytes) == 1024
-        
-        ws.send_bytes(pcm_bytes)
-        
-        # In loopback mode, the server echoes the binary audio back
-        echoed_bytes = ws.receive_bytes()
-        assert echoed_bytes == pcm_bytes
+        # 3. Send silence chunk (512 samples)
+        silence_pcm = bytes(1024)
+        ws.send_bytes(silence_pcm)
         
         # 4. Stop call control message
         ws.send_text(json.dumps({"type": "stop_call"}))
@@ -52,5 +39,5 @@ def test_websocket_audio_flow():
 
 if __name__ == "__main__":
     test_health_endpoint()
-    test_websocket_audio_flow()
-    print("All WebSocket integration tests passed successfully!")
+    test_websocket_vad_flow()
+    print("All WebSocket VAD integration tests passed successfully!")

@@ -106,7 +106,7 @@ voice-agent/
 
 ---
 
-### Milestone 1: Basic Audio Connection (Next Up)
+### Milestone 1: Basic Audio Connection (Completed)
 **Objective**: Solidify the audio transport pipeline between browser and FastAPI. No AI models yet.
 - **Frontend**:
   - React + Vite setup.
@@ -126,7 +126,7 @@ voice-agent/
 
 ---
 
-### Milestone 2: Voice Activity Detection (VAD)
+### Milestone 2: Voice Activity Detection (VAD) (Completed)
 **Objective**: Accurate real-time turn detection and speech boundary segmentation.
 - Install and configure **Silero VAD v5** via ONNX Runtime on backend.
 - Feed continuous 32ms (512 samples) or 64ms PCM chunks to VAD.

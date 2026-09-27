@@ -4,13 +4,15 @@ A production-oriented, low-latency real-time voice call agent built with FastAPI
 
 ---
 
-## Current Status: Milestone 1 Completed (Basic Audio Connection)
+## Current Status: Milestone 2 Completed (Silero VAD Turn Detection)
 
-The system currently implements **Milestone 1**:
+The system implements **Milestones 1 & 2**:
 - Browser microphone capture at **16 kHz 16-bit Mono PCM** via high-priority `AudioWorklet`.
+- Server-side real-time **Silero VAD v5 (ONNX)** turn detection (< 2ms CPU inference per frame).
+- Real-time speech boundary events (`speech_start` & `speech_end` with 400ms silence endpointing).
+- Live VAD confidence bar and reactive `User Speaking` vs `Listening` status badges in the UI.
 - Full-duplex WebSocket connection between React frontend and FastAPI backend.
 - Server-side frame validation, volume telemetry (RMS & dBFS), and clean disconnect lifecycle.
-- Real-time animated canvas waveform visualizer.
 - Optional loopback echo mode for end-to-end audio roundtrip testing.
 
 ---

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Volume2, Cpu, Repeat, Clock } from 'lucide-react';
+import { Volume2, Cpu, Repeat, Clock, Activity } from 'lucide-react';
 
 export function AudioStats({
   telemetry,
@@ -9,12 +9,15 @@ export function AudioStats({
   onToggleLoopback,
   isCalling,
 }) {
+  const vadProb = telemetry?.vad_prob ?? 0;
+  const isSpeech = telemetry?.vad_speech ?? false;
+
   return (
     <div className="w-full bg-neutral-900/40 border border-neutral-800 rounded-2xl p-4 text-xs font-mono space-y-3">
       <div className="flex items-center justify-between text-neutral-400 font-semibold border-b border-neutral-800/80 pb-2">
         <span className="flex items-center gap-1.5">
           <Cpu className="w-3.5 h-3.5 text-neutral-400" />
-          Stream Telemetry (Milestone 1)
+          Stream Telemetry & VAD (Milestone 2)
         </span>
         <label className="flex items-center gap-2 cursor-pointer select-none">
           <input
@@ -33,13 +36,18 @@ export function AudioStats({
 
       <div className="grid grid-cols-2 gap-3 text-neutral-300">
         <div className="bg-neutral-950/60 p-2.5 rounded-lg border border-neutral-800/50">
-          <div className="text-[10px] text-neutral-500 uppercase tracking-wider">Format</div>
-          <div className="font-semibold text-neutral-200 mt-0.5">16kHz 16-bit Mono</div>
+          <div className="text-[10px] text-neutral-500 uppercase tracking-wider">Format / Engine</div>
+          <div className="font-semibold text-neutral-200 mt-0.5">16kHz Int16 / Silero v5</div>
         </div>
 
         <div className="bg-neutral-950/60 p-2.5 rounded-lg border border-neutral-800/50">
-          <div className="text-[10px] text-neutral-500 uppercase tracking-wider">Frame Size</div>
-          <div className="font-semibold text-neutral-200 mt-0.5">512 smp (32ms)</div>
+          <div className="text-[10px] text-neutral-500 uppercase tracking-wider">VAD Speech Detector</div>
+          <div className="font-semibold mt-0.5 flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${isSpeech ? 'bg-emerald-400 animate-ping' : 'bg-neutral-600'}`} />
+            <span className={isSpeech ? 'text-emerald-400' : 'text-neutral-400'}>
+              {isSpeech ? 'SPEECH ACTIVE' : 'Silence'}
+            </span>
+          </div>
         </div>
 
         <div className="bg-neutral-950/60 p-2.5 rounded-lg border border-neutral-800/50">
@@ -50,11 +58,30 @@ export function AudioStats({
         </div>
 
         <div className="bg-neutral-950/60 p-2.5 rounded-lg border border-neutral-800/50">
-          <div className="text-[10px] text-neutral-500 uppercase tracking-wider">Server Signal Level</div>
-          <div className="font-semibold text-neutral-200 mt-0.5 flex items-center gap-1.5">
-            <Volume2 className="w-3 h-3 text-neutral-400" />
-            {telemetry ? `${telemetry.db} dBFS` : '—'}
+          <div className="text-[10px] text-neutral-500 uppercase tracking-wider">Signal Level & VAD Prob</div>
+          <div className="font-semibold text-neutral-200 mt-0.5 flex items-center justify-between">
+            <span className="flex items-center gap-1">
+              <Volume2 className="w-3 h-3 text-neutral-400" />
+              {telemetry ? `${telemetry.db} dB` : '—'}
+            </span>
+            <span className="text-[11px] text-emerald-400 font-mono">
+              {(vadProb * 100).toFixed(0)}%
+            </span>
           </div>
+        </div>
+      </div>
+
+      {/* VAD Confidence Bar */}
+      <div className="space-y-1 pt-0.5">
+        <div className="flex justify-between text-[10px] text-neutral-500">
+          <span>Silero VAD Confidence</span>
+          <span>{(vadProb * 100).toFixed(1)}%</span>
+        </div>
+        <div className="w-full bg-neutral-800 h-1.5 rounded-full overflow-hidden">
+          <div
+            className={`h-full transition-all duration-150 ${vadProb >= 0.5 ? 'bg-emerald-400' : 'bg-neutral-500'}`}
+            style={{ width: `${Math.min(100, vadProb * 100)}%` }}
+          />
         </div>
       </div>
 

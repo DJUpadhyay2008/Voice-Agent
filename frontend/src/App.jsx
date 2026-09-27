@@ -5,7 +5,7 @@ import { CallButton } from './components/CallButton';
 import { CallStatus } from './components/CallStatus';
 import { Waveform } from './components/Waveform';
 import { AudioStats } from './components/AudioStats';
-import { Bot, Mic, AlertCircle } from 'lucide-react';
+import { Bot, AlertCircle } from 'lucide-react';
 
 export function App() {
   const [isCalling, setIsCalling] = useState(false);
@@ -107,7 +107,7 @@ export function App() {
           handleStopCall();
         },
         onError: () => {
-          setErrorMessage('WebSocket connection failed. Verify the backend server is running on port 8000.');
+          setErrorMessage('WebSocket connection failed. Verify backend server is running on port 8000.');
           handleStopCall();
           setStatus('error');
         },
@@ -120,6 +120,14 @@ export function App() {
         onJsonMessage: (data) => {
           if (data.type === 'audio_telemetry') {
             setTelemetry(data);
+          } else if (data.type === 'vad') {
+            if (data.event === 'speech_start') {
+              setStatus('user_speaking');
+            } else if (data.event === 'speech_end') {
+              setStatus('listening');
+            }
+          } else if (data.type === 'call_status') {
+            setStatus(data.status);
           } else if (data.type === 'pong' && data.client_time) {
             setPingMs(Date.now() - data.client_time);
           }
@@ -159,7 +167,7 @@ export function App() {
           </div>
           <h1 className="text-xl font-bold tracking-tight text-white">Real-Time Voice Agent</h1>
           <p className="text-xs text-neutral-400 max-w-xs">
-            Milestone 1 — Bidirectional Audio Transport & AudioWorklet Stream
+            Milestone 2 — Silero VAD Turn Detection & Speech Boundaries
           </p>
         </div>
 
@@ -201,7 +209,7 @@ export function App() {
 
         {/* Footer Note */}
         <div className="text-[11px] text-neutral-500 text-center space-y-1">
-          <div>Next Phase: Milestone 2 — Voice Activity Detection (Silero VAD)</div>
+          <div>Next Phase: Milestone 3 — Speech-to-Text (STT)</div>
         </div>
 
       </div>
