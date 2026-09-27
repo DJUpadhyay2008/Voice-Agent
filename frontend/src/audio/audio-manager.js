@@ -5,8 +5,8 @@ import { AudioPlayer } from './audio-player.js';
  */
 export class AudioManager {
   constructor({ sampleRate = 16000, chunkSize = 512, onAudioChunk, onRmsUpdate } = {}) {
-    this.sampleRate = sampleRate;
-    this.chunkSize = chunkSize;
+    this.targetSampleRate = sampleRate; // 16000 Hz
+    this.chunkSize = chunkSize;         // 512 samples = 32ms
     this.onAudioChunk = onAudioChunk;
     this.onRmsUpdate = onRmsUpdate;
 
@@ -25,22 +25,22 @@ export class AudioManager {
     this.mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
-        sampleRate: { ideal: this.sampleRate },
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
       },
     });
 
-    // 2. Initialize AudioContext at target sample rate (16kHz)
+    // 2. Initialize AudioContext at native hardware sample rate (e.g. 48000Hz or 44100Hz)
+    // Avoid forcing 16000Hz on Linux PipeWire/ALSA to prevent zero-filled resampler buffers!
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    this.audioContext = new AudioContextClass({ sampleRate: this.sampleRate });
+    this.audioContext = new AudioContextClass();
 
     if (this.audioContext.state === 'suspended') {
       await this.audioContext.resume();
     }
 
-    // Initialize player with same audio context
+    // Initialize playback player (runs at 16kHz for TTS/loopback)
     await this.player.init(this.audioContext);
 
     // 3. Load AudioWorklet module
@@ -49,7 +49,10 @@ export class AudioManager {
     // 4. Create source and worklet nodes
     this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
     this.workletNode = new AudioWorkletNode(this.audioContext, 'audio-capture-processor', {
-      processorOptions: { chunkSize: this.chunkSize },
+      processorOptions: {
+        targetSampleRate: this.targetSampleRate,
+        chunkSize: this.chunkSize,
+      },
     });
 
     // 5. Handle audio chunks and RMS values from AudioWorklet
@@ -66,7 +69,7 @@ export class AudioManager {
     };
 
     // Connect nodes: Mic -> WorkletNode -> Silent Gain -> Destination
-    // Note: Silent Gain (0 volume) keeps Web Audio engine active without mic feedback into speakers!
+    // Silent Gain (0 volume) keeps Web Audio engine active without mic feedback into speakers!
     const silentGain = this.audioContext.createGain();
     silentGain.gain.value = 0;
 
