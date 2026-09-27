@@ -35,8 +35,12 @@ def test_vad_state_machine_speech_start_and_end():
     dummy_chunk = bytes(1024)
     
     for idx, prob in enumerate(probs):
-        # Mock session output: [array([[prob]]), new_state]
-        vad.session.run = MagicMock(return_value=[np.array([[prob]], dtype=np.float32), np.zeros((2, 1, 128), dtype=np.float32)])
+        # Mock session output: [prob_array, h_state, c_state]
+        vad.session.run = MagicMock(return_value=[
+            np.array([[prob]], dtype=np.float32),
+            np.zeros((2, 1, 64), dtype=np.float32),
+            np.zeros((2, 1, 64), dtype=np.float32)
+        ])
         res = vad.process_chunk(dummy_chunk)
         
         if res.event == "speech_start":

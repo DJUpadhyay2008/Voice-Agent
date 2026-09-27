@@ -34,7 +34,7 @@ class VADProvider(ABC):
 
 class SileroVADProvider(VADProvider):
     """
-    Local Voice Activity Detection provider using Silero VAD v5 ONNX model.
+    Local Voice Activity Detection provider using official Silero VAD v4 ONNX model.
     Runs on CPU with sub-2ms latency per 32ms frame (512 samples at 16kHz).
     """
 
@@ -69,14 +69,15 @@ class SileroVADProvider(VADProvider):
 
     def reset(self):
         """Reset state tensors and turn state machine."""
-        self._state = np.zeros((2, 1, 128), dtype=np.float32)
+        self._h = np.zeros((2, 1, 64), dtype=np.float32)
+        self._c = np.zeros((2, 1, 64), dtype=np.float32)
         self._triggered = False
         self._speech_samples = 0
         self._silence_samples = 0
 
     def process_chunk(self, chunk: bytes) -> VADResult:
         """
-        Processes a raw 16-bit PCM chunk.
+        Processes a raw 16-bit PCM chunk (512 samples at 16kHz).
         Calculates speech probability and updates state machine for turn detection.
         """
         if not chunk or len(chunk) < 2:
@@ -87,18 +88,20 @@ class SileroVADProvider(VADProvider):
         chunk_samples = len(audio_float)
         input_tensor = np.expand_dims(audio_float, axis=0)  # Shape [1, num_samples]
 
-        # Run ONNX inference
+        # Run ONNX inference with h and c hidden states
         outputs = self.session.run(
             None,
             {
                 "input": input_tensor,
-                "state": self._state,
+                "h": self._h,
+                "c": self._c,
                 "sr": self.sr_tensor,
             }
         )
         
         prob = float(outputs[0][0][0])
-        self._state = outputs[1]  # Updated RNN state tensor
+        self._h = outputs[1]  # Updated h state
+        self._c = outputs[2]  # Updated c state
 
         event: Optional[str] = None
         chunk_ms = (chunk_samples / self.sample_rate) * 1000.0
