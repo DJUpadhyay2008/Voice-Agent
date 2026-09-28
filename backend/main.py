@@ -8,6 +8,7 @@ from backend.config import settings
 from backend.logger import get_logger
 from backend.voice.audio import validate_pcm_chunk, compute_rms, compute_db
 from backend.voice.vad import SileroVADProvider
+from backend.voice.stt import get_stt_provider
 
 logger = get_logger("main")
 
@@ -30,6 +31,7 @@ app.add_middleware(
 @app.get("/health")
 async def health_check() -> Dict[str, Any]:
     """Health check endpoint to verify backend status."""
+    stt = get_stt_provider()
     return {
         "status": "healthy",
         "timestamp": time.time(),
@@ -41,7 +43,8 @@ async def health_check() -> Dict[str, Any]:
             "bytes_per_chunk": settings.bytes_per_chunk,
         },
         "loopback_default": settings.ENABLE_LOOPBACK,
-        "vad_provider": "SileroVADProvider (v5 ONNX)",
+        "vad_provider": "SileroVADProvider (v4 ONNX)",
+        "stt_provider": stt.__class__.__name__,
     }
 
 @app.websocket("/ws/call/{session_id}")
@@ -52,7 +55,8 @@ async def websocket_call_endpoint(
 ):
     """
     Bidirectional WebSocket endpoint for the real-time voice session.
-    Processes 16kHz 16-bit Mono PCM audio chunks with Silero VAD turn detection.
+    Processes 16kHz 16-bit Mono PCM audio chunks with Silero VAD turn detection
+    and Speech-to-Text (STT) transcription.
     """
     await websocket.accept()
     
@@ -62,7 +66,7 @@ async def websocket_call_endpoint(
     total_bytes = 0
     last_stats_time = time.time()
 
-    # Initialize Silero VAD for this conversation session
+    # Initialize Voice Pipeline components for this session
     vad_provider = SileroVADProvider(
         sample_rate=settings.SAMPLE_RATE,
         threshold=0.5,
@@ -70,9 +74,13 @@ async def websocket_call_endpoint(
         min_speech_duration_ms=100,
         min_silence_duration_ms=400,
     )
+    stt_provider = get_stt_provider()
     
+    # In-memory buffer to accumulate PCM bytes for the active speech turn
+    speech_buffer = bytearray()
+
     logger.info(
-        f"Client connected. loopback={is_loopback_active}, vad=SileroVAD",
+        f"Client connected. loopback={is_loopback_active}, vad=SileroVAD, stt={stt_provider.__class__.__name__}",
         extra={"session_id": session_id}
     )
 
@@ -85,7 +93,8 @@ async def websocket_call_endpoint(
             "channels": settings.CHANNELS,
             "chunk_size": settings.CHUNK_SIZE,
             "loopback": is_loopback_active,
-            "vad": "silero_v5",
+            "vad": "silero_v4",
+            "stt": stt_provider.__class__.__name__,
         },
         "status": "connected"
     }))
@@ -113,7 +122,11 @@ async def websocket_call_endpoint(
                 # Run Voice Activity Detection
                 vad_result = vad_provider.process_chunk(audio_chunk)
 
-                # Broadcast VAD turn events (speech_start / speech_end)
+                # Accumulate speech frames during an active speech turn
+                if vad_result.is_speech or vad_result.event == "speech_start":
+                    speech_buffer.extend(audio_chunk)
+
+                # Handle VAD turn events
                 if vad_result.event:
                     await websocket.send_text(json.dumps({
                         "type": "vad",
@@ -124,12 +137,33 @@ async def websocket_call_endpoint(
                         "timestamp": time.time(),
                     }))
 
-                    # Notify status update
+                    # Status update
                     new_status = "user_speaking" if vad_result.event == "speech_start" else "listening"
                     await websocket.send_text(json.dumps({
                         "type": "call_status",
                         "status": new_status,
                     }))
+
+                    # When speech finishes, trigger Speech-to-Text transcription
+                    if vad_result.event == "speech_end" and len(speech_buffer) > 0:
+                        utterance_pcm = bytes(speech_buffer)
+                        speech_buffer.clear()
+
+                        # Transcribe user utterance
+                        stt_transcript = await stt_provider.transcribe(
+                            utterance_pcm, sample_rate=settings.SAMPLE_RATE
+                        )
+
+                        if stt_transcript.text:
+                            await websocket.send_text(json.dumps({
+                                "type": "transcript",
+                                "role": "user",
+                                "text": stt_transcript.text,
+                                "is_final": True,
+                                "confidence": stt_transcript.confidence,
+                                "duration_ms": stt_transcript.duration_ms,
+                                "timestamp": time.time(),
+                            }))
 
                 # Compute audio volume metrics
                 rms = compute_rms(audio_chunk)
@@ -139,7 +173,7 @@ async def websocket_call_endpoint(
                 if is_loopback_active:
                     await websocket.send_bytes(audio_chunk)
 
-                # Send telemetry update every ~100ms (approx every 3 frames at 32ms)
+                # Send telemetry update every ~100ms
                 now = time.time()
                 if now - last_stats_time >= 0.1:
                     await websocket.send_text(json.dumps({
@@ -168,12 +202,14 @@ async def websocket_call_endpoint(
                         }))
                     elif msg_type == "start_call":
                         vad_provider.reset()
+                        speech_buffer.clear()
                         logger.info("Call started by client", extra={"session_id": session_id})
                         await websocket.send_text(json.dumps({
                             "type": "call_status",
                             "status": "listening"
                         }))
                     elif msg_type == "stop_call":
+                        speech_buffer.clear()
                         logger.info("Call stopped by client", extra={"session_id": session_id})
                         await websocket.send_text(json.dumps({
                             "type": "call_status",

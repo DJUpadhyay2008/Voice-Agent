@@ -140,13 +140,11 @@ voice-agent/
 
 ---
 
-### Milestone 3: Speech-to-Text (STT)
+### Milestone 3: Speech-to-Text (STT) (Completed)
 **Objective**: Transcribe user speech into text.
-- Build `STTProvider` abstraction.
-- Implement:
-  1. *Local Provider*: **Faster-Whisper** (transcribes completed utterance buffer emitted by VAD).
-  2. *Streaming Cloud Provider*: **Deepgram Nova-2** (streams partials + final transcripts).
-- UI displays real-time transcript ("You: ...").
+- Build `STTProvider` abstraction (`FasterWhisperSTTProvider` local & `DeepgramSTTProvider` cloud API option).
+- Process completed utterance buffer accumulated during VAD `speech_start` $\to$ `speech_end`.
+- UI displays real-time transcript history ("You: Hello...").
 - Distinguish between interim partial transcripts and finalized user utterances.
 
 ---

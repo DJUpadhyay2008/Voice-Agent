@@ -6,6 +6,7 @@ import { CallButton } from './components/CallButton';
 import { CallStatus } from './components/CallStatus';
 import { Waveform } from './components/Waveform';
 import { AudioStats } from './components/AudioStats';
+import { Transcript } from './components/Transcript';
 import { Bot, AlertCircle } from 'lucide-react';
 
 export function App() {
@@ -19,6 +20,7 @@ export function App() {
   const [pingMs, setPingMs] = useState(null);
   const [loopbackEnabled, setLoopbackEnabled] = useState(false);
   const [isSimulatingSpeech, setIsSimulatingSpeech] = useState(false);
+  const [transcripts, setTranscripts] = useState([]);
   const [errorMessage, setErrorMessage] = useState(null);
 
   const audioManagerRef = useRef(null);
@@ -80,6 +82,7 @@ export function App() {
       setSessionId(newSessionId);
       setChunksSent(0);
       setTelemetry(null);
+      setTranscripts([]);
 
       // 1. If not using synthetic test audio, start browser microphone
       if (!isSimulatingSpeech) {
@@ -150,6 +153,14 @@ export function App() {
             } else if (data.event === 'speech_end') {
               setStatus('listening');
             }
+          } else if (data.type === 'transcript') {
+            setTranscripts((prev) => [...prev, {
+              role: data.role || 'user',
+              text: data.text,
+              confidence: data.confidence,
+              duration_ms: data.duration_ms,
+              is_final: data.is_final,
+            }]);
           } else if (data.type === 'call_status') {
             setStatus(data.status);
           } else if (data.type === 'pong' && data.client_time) {
@@ -191,7 +202,7 @@ export function App() {
           </div>
           <h1 className="text-xl font-bold tracking-tight text-white">Real-Time Voice Agent</h1>
           <p className="text-xs text-neutral-400 max-w-xs">
-            Milestone 2 — Silero VAD Turn Detection & Speech Boundaries
+            Milestone 3 — Speech-to-Text (STT) & Real-Time Transcription
           </p>
         </div>
 
@@ -212,13 +223,18 @@ export function App() {
         <Waveform rms={rms} isCalling={isCalling} />
 
         {/* Action Call Button */}
-        <div className="py-2">
+        <div className="py-1">
           <CallButton
             isCalling={isCalling}
             isLoading={isLoading}
             onStart={handleStartCall}
             onStop={handleStopCall}
           />
+        </div>
+
+        {/* Live Conversation Transcript Card */}
+        <div className="w-full">
+          <Transcript transcripts={transcripts} />
         </div>
 
         {/* Audio Telemetry Card */}
@@ -235,7 +251,7 @@ export function App() {
 
         {/* Footer Note */}
         <div className="text-[11px] text-neutral-500 text-center space-y-1">
-          <div>Next Phase: Milestone 3 — Speech-to-Text (STT)</div>
+          <div>Next Phase: Milestone 4 — LLM Conversational Brain</div>
         </div>
 
       </div>

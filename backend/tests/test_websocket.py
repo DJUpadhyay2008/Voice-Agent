@@ -2,7 +2,6 @@ import json
 import numpy as np
 from fastapi.testclient import TestClient
 from backend.main import app
-from backend.voice.audio import float32_to_pcm
 
 def test_health_endpoint():
     client = TestClient(app)
@@ -10,17 +9,19 @@ def test_health_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert data["vad_provider"] == "SileroVADProvider (v5 ONNX)"
+    assert data["vad_provider"] == "SileroVADProvider (v4 ONNX)"
+    assert data["stt_provider"] == "FasterWhisperSTTProvider"
 
-def test_websocket_vad_flow():
+def test_websocket_vad_and_stt_flow():
     client = TestClient(app)
-    session_id = "test-vad-session"
+    session_id = "test-vad-stt-session"
     
     with client.websocket_connect(f"/ws/call/{session_id}?loopback=false") as ws:
         # 1. Verify session created greeting
         init_msg = ws.receive_json()
         assert init_msg["type"] == "session_created"
-        assert init_msg["config"]["vad"] == "silero_v5"
+        assert init_msg["config"]["vad"] == "silero_v4"
+        assert init_msg["config"]["stt"] == "FasterWhisperSTTProvider"
         
         # 2. Send ping, receive pong
         ws.send_text(json.dumps({"type": "ping", "timestamp": 12345}))
@@ -39,5 +40,5 @@ def test_websocket_vad_flow():
 
 if __name__ == "__main__":
     test_health_endpoint()
-    test_websocket_vad_flow()
-    print("All WebSocket VAD integration tests passed successfully!")
+    test_websocket_vad_and_stt_flow()
+    print("All WebSocket VAD & STT integration tests passed successfully!")
